@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rifa Xbox — Painel</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{--bg:#0b1220;--card:#071024;--muted:#98a7bf;--accent:#7c3aed;--success:#10b981;--danger:#ef4444;--warn:#f59e0b}
+    body{font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,#071028 0%,#071830 100%);color:#e6eef8;margin:0;padding:18px}
+    .container{max-width:1100px;margin:0 auto}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h1{margin:0;font-size:20px}
+    .valor{color:#00ff88;font-weight:700}
+    .card{background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;margin-top:12px}
+    .grid{display:grid;grid-template-columns:repeat(10,1fr);gap:8px;margin-top:12px}
+    .numero{padding:10px;border-radius:8px;text-align:center;font-weight:700;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));cursor:pointer;color:#cfe7ff;border:1px solid rgba(255,255,255,0.03)}
+    .numero:hover{transform:translateY(-3px)}
+    .numero.pago{background:linear-gradient(90deg,var(--success),#059669);color:#04210f;cursor:not-allowed}
+    .numero.pendente{background:linear-gradient(90deg,var(--warn),#fbbf24);color:#2b2200;cursor:not-allowed}
+    .numero.livre{background:transparent;color:#cfe7ff;border:1px dashed rgba(255,255,255,0.03)}
+    .selecionado{outline:3px solid rgba(124,58,237,0.18)}
+    form{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+    input,button,select{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    .btn{background:linear-gradient(90deg,var(--accent),#06b6d4);color:#fff;border:none;cursor:pointer}
+    .small{font-size:13px;color:var(--muted)}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left}
+    .tag{padding:6px 8px;border-radius:6px;color:#04210f;font-weight:700}
+    .tag.aprovado{background:var(--success)}
+    .tag.pendente{background:var(--warn)}
+    .tag.reprovado{background:var(--danger)}
+    .actions button{margin-right:6px}
+    @media(max-width:900px){.grid{grid-template-columns:repeat(5,1fr)}header{flex-direction:column;align-items:flex-start}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>🎮 Rifa Xbox — Prêmio Xbox ou R$800</h1>
+        <div class="small">Sorteio só será realizado após venda de todos os números.</div>
+      </div>
+      <div style="text-align:right">
+        <div class="valor">💰 Valor por número: R$15,00</div>
+        <div class="small">Link de pagamento visível após reservar</div>
+      </div>
+    </header>
+
+    <div class="card">
+      <strong>Grade (10×10)</strong>
+      <div id="grid" class="grid" aria-live="polite"></div>
+    </div>
+
+    <div class="card">
+      <strong>Reservar número</strong>
+      <form id="reservaForm" aria-label="Formulário reserva">
+        <input id="nome" placeholder="Nome completo" required/>
+        <input id="cpf" placeholder="CPF" required/>
+        <input id="telefone" placeholder="Telefone / WhatsApp" required/>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="numeroInput" type="number" min="1" max="100" placeholder="Número (1-100)" style="flex:1"/>
+          <button id="btnReservar" class="btn" type="submit">Reservar R$15</button>
+        </div>
+        <div id="pagamentoArea" style="display:none;margin-top:10px">
+          <div class="small">Conclua o pagamento via PIX:</div>
+          <a id="linkPix" class="btn" href="#" target="_blank" rel="noreferrer">👉 PAGAR AGORA (PIX)</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <strong>🔑 Painel Admin</strong>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="adminPass" type="password" placeholder="Senha admin"/>
+        <button id="btnLogin" class="btn">Entrar</button>
+        <button id="btnLogout" style="display:none" class="btn">Sair</button>
+      </div>
+
+      <div id="adminPanel" style="display:none">
+        <div style="margin-top:12px">
+          <table id="adminTable">
+            <thead><tr><th>Número</th><th>Nome</th><th>CPF</th><th>Telefone</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="small" style="margin-top:8px">Aprovar = marcar como <strong>aprovado (Pago)</strong>. Reprovar = liberar número.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SUPABASE_URL = "https://wtfrhqayhagpcjpuwhbd.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind0ZnJocWF5aGFncGNqcHV3aGJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODQyNDEsImV4cCI6MjA3NjU2MDI0MX0.kmRF74xXRdswp4Vtx3cV-_NaPdknwFhmOIcEhhiNbok";
+const PAYMENT_LINK = "https://invoice.infinitepay.io/plans/paladio/1csHpkAhBf";
+const ADMIN_PASSWORD = "Cruz2122@";
+
+let supabase = null;
+if (window.supabase && window.supabase.createClient) {
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} else { console.error("Supabase SDK não encontrado."); }
+
+const gridEl = document.getElementById('grid');
+const numeroInput = document.getElementById('numeroInput');
+const reservaForm = document.getElementById('reservaForm');
+const pagamentoArea = document.getElementById('pagamentoArea');
+const linkPix = document.getElementById('linkPix');
+const adminPass = document.getElementById('adminPass');
+const btnLogin = document.getElementById('btnLogin');
+const btnLogout = document.getElementById('btnLogout');
+const adminPanel = document.getElementById('adminPanel');
+const adminTableBody = document.querySelector('#adminTable tbody');
+let selectedNumber = null;
+let isAdmin = false;
+
+function drawGridTemplate(){
+  gridEl.innerHTML = '';
+  for(let i=1;i<=100;i++){
+    const d = document.createElement('div');
+    d.className = 'numero livre';
+    d.textContent = i;
+    d.dataset.numero = i;
+    d.setAttribute('role','button');
+    d.onclick = () => {
+      if (d.classList.contains('pago') || d.classList.contains('pendente')) return;
+      document.querySelectorAll('.numero').forEach(n=>n.classList.remove('selecionado'));
+      d.classList.add('selecionado');
+      selectedNumber = i;
+      numeroInput.value = i;
+    };
+    gridEl.appendChild(d);
+  }
+}
+drawGridTemplate();
+
+async function loadAndMark(){
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase.from('participantes').select('*');
+    if (error) { console.error(error); return; }
+    document.querySelectorAll('.numero').forEach(n=>{
+      n.classList.remove('pago','pendente','livre','selecionado');
+      n.classList.add('livre');
+      n.style.cursor = 'pointer';
+    });
+    data.forEach(r=>{
+      const el = document.querySelector('.numero[data-numero="'+r.numero+'"]');
+      if (!el) return;
+      const s = (r.status||'').toLowerCase();
+      if (s === 'aprovado' || s === 'pago') {
+        el.classList.remove('livre'); el.classList.add('pago'); el.style.cursor='not-allowed'; el.onclick = null;
+      } else if (s === 'pendente') {
+        el.classList.remove('livre'); el.classList.add('pendente'); el.style.cursor='not-allowed'; el.onclick = null;
+      }
+    });
+  } catch(e){ console.error(e); }
+}
+
+function setupRealtime(){
+  if (!supabase?.channel) return;
+  try {
+    supabase.channel('public:participantes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participantes' }, payload => {
+        loadAndMark();
+        if (isAdmin) refreshAdminTable();
+      }).subscribe();
+  } catch(err){ console.error('realtime err', err); }
+}
+
+reservaForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!selectedNumber && (!numeroInput.value || isNaN(Number(numeroInput.value)))) return alert('Selecione ou digite um número (1-100)');
+  const numero = Number(numeroInput.value);
+  const nome = document.getElementById('nome').value.trim();
+  const cpf = document.getElementById('cpf').value.trim();
+  const telefone = document.getElementById('telefone').value.trim();
+  if (!nome || !cpf || !telefone) return alert('Preencha todos os dados.');
+  if (!supabase) return alert('Conexão com Supabase indisponível.');
+  try {
+    const { data: exists } = await supabase.from('participantes').select('id,status').eq('numero', numero);
+    if (exists && exists.length>0) {
+      alert('Desculpe, esse número já está ocupado. Atualize a página.');
+      await loadAndMark();
+      return;
+    }
+    const { data, error } = await supabase.from('participantes').insert([{ nome, cpf, telefone, numero, status: 'pendente' }]).select();
+    if (error) { console.error(error); alert('Erro ao reservar: '+error.message); return; }
+    pagamentoArea.style.display = 'block';
+    linkPix.href = PAYMENT_LINK;
+    selectedNumber = null;
+    drawGridTemplate();
+    await loadAndMark();
+    reservaForm.reset();
+    alert('Reserva registrada como PENDENTE. Clique no link de pagamento para efetuar o PIX.');
+  } catch(err){ console.error(err); alert('Erro inesperado. Veja console.'); }
+});
+
+btnLogin.addEventListener('click', async ()=>{
+  const pass = adminPass.value;
+  if (pass !== ADMIN_PASSWORD) return alert('Senha incorreta.');
+  isAdmin = true;
+  adminPanel.style.display = 'block';
+  btnLogin.style.display = 'none';
+  btnLogout.style.display = 'inline-block';
+  await refreshAdminTable();
+});
+
+btnLogout.addEventListener('click', ()=>{
+  isAdmin = false;
+  adminPanel.style.display = 'none';
+  btnLogin.style.display = 'inline-block';
+  btnLogout.style.display = 'none';
+});
+
+async function refreshAdminTable(){
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase.from('participantes').select('*').order('numero', { ascending: true });
+    if (error) { console.error(error); return; }
+    adminTableBody.innerHTML = '';
+    data.forEach(r => {
+      const tr = document.createElement('tr');
+      const status = (r.status||'pendente').toLowerCase();
+      tr.innerHTML = `
+        <td>${r.numero}</td>
+        <td>${escapeHtml(r.nome)}</td>
+        <td>${escapeHtml(r.cpf)}</td>
+        <td>${escapeHtml(r.telefone)}</td>
+        <td><span class="tag ${status}">${status}</span></td>
+        <td class="actions">
+          <button data-id="${r.id}" class="aprovar btn">Aprovar</button>
+          <button data-id="${r.id}" class="reprovar btn">Reprovar</button>
+        </td>
+      `;
+      adminTableBody.appendChild(tr);
+    });
+    document.querySelectorAll('.aprovar').forEach(b=> b.addEventListener('click', aprovarReserva));
+    document.querySelectorAll('.reprovar').forEach(b=> b.addEventListener('click', reprovarReserva));
+  } catch(e){ console.error(e); }
+}
+
+async function aprovarReserva(ev){
+  const id = ev.currentTarget.dataset.id;
+  if (!confirm('Confirma aprovar e marcar como PAGO?')) return;
+  try {
+    const { error } = await supabase.from('participantes').update({ status: 'aprovado' }).eq('id', id);
+    if (error) { console.error(error); alert('Erro ao aprovar.'); return; }
+    await refreshAdminTable();
+    await loadAndMark();
+  } catch(e){ console.error(e); }
+}
+
+async function reprovarReserva(ev){
+  const id = ev.currentTarget.dataset.id;
+  if (!confirm('Confirma reprovar e liberar o número?')) return;
+  try {
+    const { error } = await supabase.from('participantes').update({ status: 'reprovado' }).eq('id', id);
+    if (error) { console.error(error); alert('Erro ao reprovar.'); return; }
+    await refreshAdminTable();
+    await loadAndMark();
+  } catch(e){ console.error(e); }
+}
+
+function escapeHtml(str){ if(!str) return ''; return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+(async function init(){ await loadAndMark(); setupRealtime(); })();
+</script>
+</body>
+</html>
